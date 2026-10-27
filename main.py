@@ -1,5 +1,7 @@
 """PDF text extraction and PII scrubbing endpoint for health reports."""
 
+import asyncio
+import hashlib
 import logging
 import os
 import re
@@ -29,9 +31,17 @@ class HealthReportData(BaseModel):
 
 
 class ProcessReportResponse(BaseModel):
-    status: Literal["success", "success_fallback"]
+    status: Literal["success", "success_fallback", "duplicate"]
     scrubbed_text: str
     extracted_data: HealthReportData
+    report_hash: str
+    is_duplicate: bool
+
+
+# Process-local state: cleared on restart and not shared between server workers.
+PROCESSED_HASHES: set[str] = set()
+_PROCESSED_REPORTS: dict[str, ProcessReportResponse] = {}
+_REPORT_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 class ExtractionConfigurationError(RuntimeError):
@@ -255,18 +265,34 @@ def fallback_regex_extraction(text: str) -> HealthReportData:
 
 @app.post("/process-report", response_model=ProcessReportResponse)
 async def process_report(file: UploadFile = File(...)) -> ProcessReportResponse:
-    """Return scrubbed PDF text and validated structured epidemiological data."""
+    """Process each PDF once per server process and identify repeated uploads."""
     try:
         file_bytes = await file.read()
-        extracted_text = extract_text_from_pdf(file_bytes)
-        scrubbed_text = scrub_pii(extracted_text)
-        status = "success"
-        try:
-            extracted_data = await run_in_threadpool(extract_structured_data, scrubbed_text)
-        except Exception as exc:
-            logger.warning("Using regex extraction after OpenRouter failure: %s", type(exc).__name__)
-            extracted_data = fallback_regex_extraction(scrubbed_text)
-            status = "success_fallback"
+        report_hash = hashlib.sha256(file_bytes).hexdigest()
+        # No await between lookup and insertion: concurrent requests share a lock.
+        report_lock = _REPORT_LOCKS.setdefault(report_hash, asyncio.Lock())
+        async with report_lock:
+            if report_hash in PROCESSED_HASHES:
+                return _PROCESSED_REPORTS[report_hash].model_copy(update={
+                    "status": "duplicate", "is_duplicate": True,
+                })
+
+            extracted_text = extract_text_from_pdf(file_bytes)
+            scrubbed_text = scrub_pii(extracted_text)
+            status = "success"
+            try:
+                extracted_data = await run_in_threadpool(extract_structured_data, scrubbed_text)
+            except Exception as exc:
+                logger.warning("Using regex extraction after OpenRouter failure: %s", type(exc).__name__)
+                extracted_data = fallback_regex_extraction(scrubbed_text)
+                status = "success_fallback"
+            result = ProcessReportResponse(
+                status=status, scrubbed_text=scrubbed_text, extracted_data=extracted_data,
+                report_hash=report_hash, is_duplicate=False,
+            )
+            _PROCESSED_REPORTS[report_hash] = result
+            PROCESSED_HASHES.add(report_hash)
+            return result
     except FallbackExtractionError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
@@ -279,7 +305,3 @@ async def process_report(file: UploadFile = File(...)) -> ProcessReportResponse:
         raise HTTPException(status_code=500, detail="Unable to process the report.") from exc
     finally:
         await file.close()
-
-    return ProcessReportResponse(
-        status=status, scrubbed_text=scrubbed_text, extracted_data=extracted_data
-    )
