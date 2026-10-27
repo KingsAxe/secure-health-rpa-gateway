@@ -1,5 +1,17 @@
 | Date | Error/Issue | Root Cause | Resolution |
 | --- | --- | --- | --- |
 | 2026-10-27 | `404 Not Found` when opening the root URL | A `GET` request was sent to `/`, which has no registered route. The report endpoint accepts `POST` requests at `/process-report`. | Send a `POST` request to `/process-report` with the PDF as a multipart upload in the `file` field. Use `/docs` to test the endpoint interactively. |
-| 2026-10-27 | PyMuPDF `fitz` deprecation warning | The application imports PyMuPDF through the deprecated `fitz` module name. | Replace `import fitz` with `import pymupdf as fitz` to use the supported module name while preserving existing `fitz` references. |
+| 2026-10-27 | PyMuPDF `fitz` deprecation warning | The application imports PyMuPDF through the deprecated `fitz` module name. | Replaced `import fitz` with `import pymupdf` and updated PDF opening and exception references to use `pymupdf`. |
 | 2026-10-27 | Risk of staging untracked virtual environment files during initial Git staging | A missing `.gitignore` allowed virtual environment files to appear as untracked files eligible for staging. | Created a standard Python `.gitignore` to exclude `venv/`, `__pycache__/`, `*.pyc`, `.env`, `.pytest_cache/`, and `.vscode/`. |
+| 2026-10-27 | HTTP 502: `Unable to obtain valid report data from OpenRouter` | Swallowed OpenRouter client/parsing exceptions hid the underlying API or response-format failure behind a generic gateway error. | Added full exception traceback logging, standard JSON mode with `response_format={"type": "json_object"}`, an explicit raw JSON prompt, and Pydantic validation. Configured the OpenRouter attribution headers using the SDK's client-level `default_headers` argument. Extraction failures now invoke the regex fallback. |
+| 2026-10-27 | HTTP 402: OpenRouter API `Insufficient credits` | The paid model `openai/gpt-4o-mini` was used with an unfunded API key. | Switched the model target to OpenRouter free models (`openrouter/free`) and added a regex extraction fallback mechanism. |
+
+## Approach adopted
+
+The gateway extracts PDF text with PyMuPDF, scrubs detected names and phone numbers, and sends the scrubbed text to OpenRouter. The system prompt treats report text as untrusted data and instructs the model to ignore embedded commands. Escaped `<REPORT_PAYLOAD>` boundaries prevent report text from closing the wrapper. JSON mode requests a raw JSON object, and strict `HealthReportData` validation checks the four required fields and rejects extra fields or incorrect types.
+
+To diagnose the generic HTTP 502, extraction now logs the original exception traceback before propagating the failure. The client sends the local referer and application title through `default_headers`. To address HTTP 402, the model target is `openrouter/free`. Provider failures, invalid JSON, and missing credentials invoke regex extraction against the scrubbed text.
+
+The fallback matches explicit field labels and the sample table layout, normalizes simple scanner artifacts, and converts numeric or English word counts to integers. Anchored count labels ignore the sample instruction to set the count to 9999. Successful fallback responses return HTTP 200 with `status: "success_fallback"`; missing or conflicting required values return HTTP 422.
+
+Verification: 12 local unittest tests passed using mocked OpenRouter responses. Checks cover normal extraction, JSON validation, payload boundaries, HTTP 402 and other provider failures, fallback parsing of all three sample PDFs, and rejection of incomplete or conflicting values. Live OpenRouter extraction and live model resistance to prompt injection have not been verified.
