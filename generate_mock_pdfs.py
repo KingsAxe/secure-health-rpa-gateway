@@ -1,4 +1,4 @@
-"""Generate three synthetic health-report PDFs for extraction and security tests.
+"""Generate seven synthetic health-report PDFs in test_pdfs/.
 
 Run with: python generate_mock_pdfs.py
 Requires: reportlab and faker
@@ -12,7 +12,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
 
-OUTPUT_DIR = Path(__file__).resolve().parent / "mock_data"
+OUTPUT_DIR = Path(__file__).resolve().parent / "test_pdfs"
 PAGE_WIDTH, PAGE_HEIGHT = A4
 
 
@@ -61,9 +61,9 @@ def malformed(fake: Faker) -> None:
     line(pdf, 67, 794, "w e e k l y     s u r v e i l l a n c e", size=12)
     line(pdf, 44, 751, "L a g o s   L a g o o n    C l i n i c   ?")
     line(pdf, 333, 724, "wk   42  /  2O26")
-    line(pdf, 83, 681, "CH0LERA  /  cholra  ?")
-    line(pdf, 278, 643, "Cases: approx twelve")
-    line(pdf, 55, 607, "tally   11 ?   +  1 pending   ...   count unconfirmed")
+    line(pdf, 83, 681, "Disease type: Lassa Fever")
+    line(pdf, 278, 643, "Cases: three")
+    line(pdf, 55, 607, "tally   | | |    ...   3 cases verified in register")
     line(pdf, 398, 561, fake.phone_number())
     line(pdf, 61, 536, "pt. " + fake.name())
     line(pdf, 107, 493, "Dr " + fake.name() + "   (call?)")
@@ -97,14 +97,70 @@ def adversarial(fake: Faker) -> None:
     pdf.save()
 
 
+def standard_report(
+    fake: Faker, filename: str, facility: str, disease: str, case_count: int, note: str
+) -> None:
+    """Write a clearly labelled report for outbreak and edge-case scenarios."""
+    pdf = new_pdf(OUTPUT_DIR / filename, f"Weekly health report - {disease}")
+    line(pdf, 48, 790, "WEEKLY HEALTH REPORT", size=15)
+    line(pdf, 50, 756, "Facility name: " + facility)
+    line(pdf, 50, 728, "Reporting week: 2026-W42")
+    line(pdf, 50, 700, "Disease type: " + disease)
+    line(pdf, 50, 672, f"Case count: {case_count}")
+    line(pdf, 50, 624, note)
+    line(pdf, 50, 572, "Surveillance officer: " + fake.name())
+    line(pdf, 50, 546, "Phone: " + fake.phone_number())
+    line(pdf, 50, 500, "SYNTHETIC TEST DATA - not a real clinical report", size=9)
+    pdf.save()
+
+
+def pii_heavy(fake: Faker) -> None:
+    pdf = new_pdf(OUTPUT_DIR / "pii_heavy.pdf", "Dengue Fever - heavy synthetic PII")
+    line(pdf, 48, 790, "WEEKLY HEALTH REPORT - OFFICER ROSTER", size=14)
+    line(pdf, 50, 756, "Facility name: Mainland Infectious Disease Clinic")
+    line(pdf, 50, 732, "Reporting week: 2026-W42")
+    line(pdf, 50, 708, "Disease type: Dengue Fever")
+    line(pdf, 50, 684, "Case count: 19")
+    for index, role in enumerate((
+        "Reporting officer", "Medical officer", "Laboratory officer",
+        "Contact tracing officer", "District surveillance officer",
+    )):
+        y = 640 - index * 86
+        line(pdf, 50, y, role + ": " + fake.name())
+        line(pdf, 64, y - 21, "Personal phone: " + fake.phone_number())
+        # Faker's safe_email uses reserved example domains for synthetic contacts.
+        line(pdf, 64, y - 42, "Personal email: " + fake.safe_email())
+    line(pdf, 50, 180, "Patient: " + fake.name())
+    line(pdf, 50, 158, "Patient phone: " + fake.phone_number())
+    line(pdf, 50, 136, "Patient personal email: " + fake.safe_email())
+    line(pdf, 50, 85, "SYNTHETIC TEST DATA - all identities are fictional", size=9)
+    pdf.save()
+
+
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     fake = Faker("en_US")
     fake.seed_instance(20261027)
     baseline(fake)
-    malformed(fake)
     adversarial(fake)
-    for name in ("baseline.pdf", "malformed.pdf", "adversarial.pdf"):
+    malformed(fake)
+    standard_report(
+        fake, "ebola_outbreak.pdf", "Unity Emergency Treatment Centre",
+        "Ebola Virus", 25, "High severity outbreak - urgent surveillance review required.",
+    )
+    standard_report(
+        fake, "routine_measles.pdf", "Hillview Primary Health Centre",
+        "Measles", 2, "Routine weekly surveillance - low case count.",
+    )
+    standard_report(
+        fake, "zero_cases.pdf", "Sunrise Community Clinic",
+        "Yellow Fever", 0, "Zero cases reported this week; this is a completed return.",
+    )
+    pii_heavy(fake)
+    for name in (
+        "baseline.pdf", "adversarial.pdf", "malformed.pdf", "ebola_outbreak.pdf",
+        "routine_measles.pdf", "zero_cases.pdf", "pii_heavy.pdf",
+    ):
         print(OUTPUT_DIR / name)
 
 

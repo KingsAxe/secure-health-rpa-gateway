@@ -1,0 +1,9 @@
+fastapi==0.162.0
+uvicorn==0.54.0
+pydantic==2.14.1
+PyMuPDF==2.0
+spacy==3.8.18
+openai==3.39.0
+python-multipart==0.0.32
+reportlab==5.1.0
+Faker==40.43.0
