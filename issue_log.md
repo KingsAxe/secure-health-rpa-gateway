@@ -1,0 +1,5 @@
+| Date | Error/Issue | Root Cause | Resolution |
+| --- | --- | --- | --- |
+| 2026-10-27 | `404 Not Found` when opening the root URL | A `GET` request was sent to `/`, which has no registered route. The report endpoint accepts `POST` requests at `/process-report`. | Send a `POST` request to `/process-report` with the PDF as a multipart upload in the `file` field. Use `/docs` to test the endpoint interactively. |
+| 2026-10-27 | PyMuPDF `fitz` deprecation warning | The application imports PyMuPDF through the deprecated `fitz` module name. | Replace `import fitz` with `import pymupdf as fitz` to use the supported module name while preserving existing `fitz` references. |
+| 2026-10-27 | Risk of staging untracked virtual environment files during initial Git staging | A missing `.gitignore` allowed virtual environment files to appear as untracked files eligible for staging. | Created a standard Python `.gitignore` to exclude `venv/`, `__pycache__/`, `*.pyc`, `.env`, `.pytest_cache/`, and `.vscode/`. |
